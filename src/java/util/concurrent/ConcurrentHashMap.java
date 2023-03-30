@@ -755,6 +755,13 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
         return (Node<K,V>)U.getObjectVolatile(tab, ((long)i << ASHIFT) + ABASE);
     }
 
+    /**
+     * 通过CAS的方式去向Node数组指定位置i设置节点值，设置成功返回true，否则返回false
+     * Node<K,V>[] tab：表示Node[]数组
+     * int i：表示数组下标
+     * Node<K,V> c：期望节点值
+     * Node<K,V> v：要设置的节点值
+     */
     static final <K,V> boolean casTabAt(Node<K,V>[] tab, int i,
                                         Node<K,V> c, Node<K,V> v) {
         return U.compareAndSwapObject(tab, ((long)i << ASHIFT) + ABASE, c, v);
@@ -997,7 +1004,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * with a key that is equal to the original key.
      *
      * @param key key with which the specified value is to be associated
-     * @param value value to be associated with the specified key
+     * @param value value to be associated with the specified keREADME.mdy
      * @return the previous value associated with {@code key}, or
      *         {@code null} if there was no mapping for {@code key}
      * @throws NullPointerException if the specified key or value is null
@@ -2223,10 +2230,17 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
     private final Node<K,V>[] initTable() {
         Node<K,V>[] tab; int sc;
         while ((tab = table) == null || tab.length == 0) {
+            // 简单检查
             if ((sc = sizeCtl) < 0)
                 Thread.yield(); // lost initialization race; just spin
+                // 如果为-1，表示正在初始化中， 注意，这里cas 的是 sizeCtl 属性
             else if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {
                 try {
+                    /*
+                     * 并发访问
+                     * 线程1  访问sc为 0, 进入逻辑
+                     * 线程2  没有走到 sizeCtl = sc 则为false， 直到true为止
+                     */
                     if ((tab = table) == null || tab.length == 0) {
                         int n = (sc > 0) ? sc : DEFAULT_CAPACITY;
                         @SuppressWarnings("unchecked")
@@ -6299,8 +6313,20 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
             Class<?> ck = CounterCell.class;
             CELLVALUE = U.objectFieldOffset
                 (ck.getDeclaredField("value"));
+
+            // Node数组的class对象
             Class<?> ak = Node[].class;
+            // U.arrayBaseOffset(ak)：根据as获取Node[]数组第一个元素的偏移地址ABASE
             ABASE = U.arrayBaseOffset(ak);
+            /*
+             * numberOfLeadingZeros(scale) 根据scale，返回当前数值转换为二进制后，从高位到地位开始统计，统计有多少个0连续在一块：eg, 8转换二进制=>1000 则 numberOfLeadingZeros(8)的结果就是28，
+             * Integer是32位，1000占4位，那么前面就有32-4个0，即连续最长的0的个数为28个
+             *
+             * 4转换二进制=>100 则 numberOfLeadingZeros(8)的结果就是29
+             * ASHIFT = 31 - Integer.numberOfLeadingZeros(4) = 2 那么ASHIFT的作用是什么呢？其实它有数组寻址的一个作用：
+             * 拿到下标为5的Node[]数组元素的偏移地址(存储地址)：假设此时 根据scale计算得到的ASHIFT = 2
+             * ABASE + (5 << ASHIFT) == ABASE + (5 << 2) == ABASE + 5 * scale(乘法运算效率低)，就得到了下标为5的数组元素的偏移地址
+             */
             int scale = U.arrayIndexScale(ak);
             if ((scale & (scale - 1)) != 0)
                 throw new Error("data type scale not a power of two");
